@@ -842,7 +842,7 @@ if __name__ == '__main__':
         "branch": "main",
         "base_url": "http://llama-stack-service:8321",
         "backend_url": "http://canopy-backend:8000",
-        "secret_name": "aws-connection-test-results",
+        "secret_name": "test-results",
         "git_hash": "test",
     }
         
