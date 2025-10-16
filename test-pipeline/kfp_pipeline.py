@@ -871,6 +871,6 @@ if __name__ == '__main__':
     client.create_run_from_pipeline_func(
         canopy_test_pipeline,
         arguments=arguments,
-        experiment_name="kfp-training-pipeline",
+        experiment_name="kfp-evals-pipeline",
         enable_caching=False
     )
