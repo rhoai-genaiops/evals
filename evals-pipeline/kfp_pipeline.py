@@ -771,7 +771,7 @@ def canopy_test_pipeline(
     branch: str = "main",
     base_url: str = "",
     backend_url: str = "",
-    secret_name: str = "aws-connection-test-results",
+    secret_name: str = "test-results",
     git_hash: str = "test"
 ):
 
@@ -825,7 +825,7 @@ def canopy_test_pipeline(
     # Add environment variables from Kubernetes secret for S3 access
     kubernetes.use_secret_as_env(
         test_task,
-        secret_name="aws-connection-test-results",
+        secret_name=secret_name,
         secret_key_to_env={
             'AWS_ACCESS_KEY_ID': 'AWS_ACCESS_KEY_ID',
             'AWS_DEFAULT_REGION': 'AWS_DEFAULT_REGION', 
@@ -842,7 +842,7 @@ if __name__ == '__main__':
         "branch": "main",
         "base_url": "http://llama-stack-service:8321",
         "backend_url": "http://canopy-backend:8000",
-        "secret_name": "aws-connection-test-results",
+        "secret_name": "test-results",
         "git_hash": "test",
     }
         
@@ -871,6 +871,6 @@ if __name__ == '__main__':
     client.create_run_from_pipeline_func(
         canopy_test_pipeline,
         arguments=arguments,
-        experiment_name="kfp-training-pipeline",
+        experiment_name="kfp-evals-pipeline",
         enable_caching=False
     )
