@@ -838,7 +838,7 @@ def canopy_test_pipeline(
 
 if __name__ == '__main__':
     arguments = {
-        "repo_url": "https://<USER_NAME>:<PASSWORD>@<GIT_SERVER>/<USER_NAME>/canopy-evals.git", # 🚨 replace with your own repo URL
+        "repo_url": "https://<USER_NAME>:<PASSWORD>@<GIT_SERVER>/<USER_NAME>/evals.git", # 🚨 replace with your own repo URL
         "branch": "main",
         "base_url": "http://llama-stack-service:8321",
         "backend_url": "http://canopy-backend:8000",
