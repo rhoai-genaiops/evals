@@ -99,7 +99,7 @@ def scan_directory_op() -> NamedTuple("Output", [("llamastack_configs", List[dic
 
 
 
-@component(base_image="python:3.11", packages_to_install=["git+https://github.com/meta-llama/llama-stack.git@release-0.2.12", "boto3"])
+@component(base_image="python:3.12", packages_to_install=["llama-stack-client==0.3.0", "boto3"])
 def run_all_llamastack_tests(
     llamastack_configs: List[dict],  # List of config dictionaries
     base_url: str,
