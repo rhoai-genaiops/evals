@@ -157,6 +157,110 @@ def run_all_llamastack_tests(
         }
         return send_request(payload, url)
 
+    def is_agent_test_config(config):
+        """
+        Determine if this is an agent test configuration.
+
+        Agent tests have:
+        - expected_tools in any test
+        - tool_choice scorer in scoring_params
+        - endpoint containing 'assistant'
+        """
+        # Check tests for expected_tools
+        for test in config.get("tests", []):
+            if "expected_tools" in test:
+                return True
+
+        # Check scoring params
+        scoring_params = config.get("scoring_params", {})
+        if "basic::tool_choice" in scoring_params or "basic::task_completion" in scoring_params:
+            return True
+
+        # Check endpoint name as fallback
+        endpoint = config.get("endpoint", "")
+        if "assistant" in endpoint:
+            return True
+
+        return False
+
+    def prompt_agent_backend(prompt, backend_url, test_endpoint):
+        """
+        Agent endpoint - returns dict with answer + tool_calls.
+
+        Parses the streaming response to capture:
+        - Final answer text
+        - All tool calls made by the agent
+        """
+        import httpx
+        url = urljoin(backend_url, test_endpoint)
+        payload = {"prompt": prompt}
+
+        full_response = ""
+        tool_calls = []
+
+        with httpx.Client(timeout=None) as client:
+            with client.stream("POST", url, json=payload) as response:
+                for line in response.iter_lines():
+                    if line.startswith("data: "):
+                        try:
+                            data = json.loads(line[len("data: "):])
+
+                            # Capture tool calls
+                            if data.get("type") == "tool_call":
+                                tool_calls.append(data["name"])
+
+                            # Capture final answer
+                            elif "delta" in data:
+                                full_response += data.get("delta", "")
+                        except json.JSONDecodeError:
+                            continue
+
+        return {
+            "answer": full_response,
+            "tool_calls": tool_calls
+        }
+
+    def score_tool_choice(eval_row):
+        """
+        Score whether expected tools were called.
+
+        Returns:
+        - 1.0: All expected tools called, no extras
+        - 0.8: All expected tools called, but called extra tools too
+        - 0.5: Called some but not all expected tools
+        - 0.0: Missed all expected tools
+        """
+        actual_tools = eval_row.get("tool_calls", [])
+        expected_tools = eval_row.get("expected_tools", [])
+
+        if not expected_tools:
+            return {"score": 1.0, "note": "No tool expectations"}
+
+        # Compare tool sets
+        tools_called = set(actual_tools)
+        tools_expected = set(expected_tools)
+
+        missing = tools_expected - tools_called
+        extra = tools_called - tools_expected
+
+        # Score based on match quality
+        if not missing and not extra:
+            score = 1.0  # Perfect match
+        elif not missing:
+            score = 0.8  # Called all expected + extras
+        elif len(missing) < len(expected_tools):
+            score = 0.5  # Called some expected tools
+        else:
+            score = 0.0  # Missed all expected tools
+
+        return {
+            "score": score,
+            "tools_called": list(actual_tools),
+            "tools_expected": list(expected_tools),
+            "missing_tools": list(missing),
+            "extra_tools": list(extra)
+        }
+
     # Function to upload individual results to S3
     def upload_results_to_s3(all_test_results, tmpdir, git_hash="test"):
         import boto3
@@ -727,23 +831,71 @@ def run_all_llamastack_tests(
             scoring_params = config["scoring_params"]
             scoring_params = replace_txt_files(scoring_params, os.path.dirname(full_config_path))
 
+            # Determine if this is an agent test
+            is_agent_test = is_agent_test_config(config)
+
             eval_rows = []
             for test in config["tests"]:
                 if "dataset" in test:
                     pass
                 else:
                     prompt = test["prompt"]
-                    eval_rows.append(
-                        {
-                            "input_query": prompt,
-                            "generated_answer": prompt_backend(prompt, backend_url, test_endpoint),
-                            "expected_answer": test["expected_result"],
-                        }
-                    )
 
-            scoring_response = lls_client.scoring.score(
-                input_rows=eval_rows, scoring_functions=scoring_params
-            )
+                    # Call appropriate backend function based on test type
+                    if is_agent_test:
+                        result = prompt_agent_backend(prompt, backend_url, test_endpoint)
+                        eval_rows.append({
+                            "input_query": prompt,
+                            "generated_answer": result["answer"],
+                            "expected_answer": test["expected_result"],
+                            "tool_calls": result["tool_calls"],
+                            "expected_tools": test.get("expected_tools", [])
+                        })
+                    else:
+                        result = prompt_backend(prompt, backend_url, test_endpoint)
+                        eval_rows.append({
+                            "input_query": prompt,
+                            "generated_answer": result,
+                            "expected_answer": test["expected_result"],
+                        })
+
+            # Handle custom scoring functions for agent tests
+            custom_scoring_results = {}
+            llama_stack_scoring_params = {}
+
+            for scorer_name, scorer_config in scoring_params.items():
+                # Check if this is a custom scorer (not handled by LlamaStack)
+                if scorer_name == "basic::tool_choice":
+                    # Run custom tool_choice scoring
+                    score_rows = []
+                    for eval_row in eval_rows:
+                        score_result = score_tool_choice(eval_row)
+                        score_rows.append(score_result)
+
+                    # Store custom results
+                    from types import SimpleNamespace
+                    custom_scoring_results[scorer_name] = SimpleNamespace(
+                        score_rows=score_rows,
+                        aggregated_results=None
+                    )
+                else:
+                    # LlamaStack scorer
+                    llama_stack_scoring_params[scorer_name] = scorer_config
+
+            # Run LlamaStack scoring for standard scorers
+            if llama_stack_scoring_params:
+                scoring_response = lls_client.scoring.score(
+                    input_rows=eval_rows, scoring_functions=llama_stack_scoring_params
+                )
+            else:
+                # No LlamaStack scorers, create empty response
+                from types import SimpleNamespace
+                scoring_response = SimpleNamespace(results={})
+
+            # Merge custom scoring results into response
+            if not hasattr(scoring_response, 'results'):
+                scoring_response.results = {}
+            scoring_response.results.update(custom_scoring_results)
             
             # Store results for this config
             all_test_results.append({
