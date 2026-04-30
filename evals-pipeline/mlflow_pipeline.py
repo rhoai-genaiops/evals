@@ -118,30 +118,10 @@ def run_all_mlflow_tests(
 
     mlflow.set_tracking_uri(mlflow_tracking_uri)
 
-    # Scorers
-    summary_quality_judge = make_judge(
-        name="summary_quality",
-        instructions=(
-            "Evaluate the quality of the GENERATED_RESPONSE given the INPUT.\n\n"
-            "{{ inputs }}\n"
-            "{{ outputs }}\n\n"
-            "Is the response a concise, accurate summary of the input?"
-        ),
-        feedback_value_type=Literal["yes", "no"],
-        model="openai:/llama32",
-        base_url=llm_endpoint + "/v1/chat/completions",
-        extra_headers={"Authorization": "Bearer no-key-required"},
-    )
-
     @scorer
     def is_shorter(outputs: str, inputs: dict) -> bool:
         """Is the response shorter than the input prompt?"""
         return len(outputs) < len(inputs.get("prompt", ""))
-
-    SCORER_MAP = {
-        "summary_quality": summary_quality_judge,
-        "is_shorter": is_shorter,
-    }
 
     # Backend helpers
     def send_request(payload, url):
@@ -180,6 +160,34 @@ def run_all_mlflow_tests(
 
         endpoint = config["endpoint"]
         scorer_names = config.get("scorers", ["summary_quality", "is_shorter"])
+
+        # Load judge prompt from file if specified in config
+        judge_prompt_file = config.get("judge_prompt")
+        if judge_prompt_file:
+            judge_prompt_path = os.path.join(os.path.dirname(full_config_path), judge_prompt_file)
+            with open(judge_prompt_path) as f:
+                judge_instructions = f.read()
+        else:
+            judge_instructions = (
+                "{{ inputs }}\n{{ outputs }}\n{{ expectations }}\n"
+                "Is the response accurate and consistent with the expected response? "
+                "Respond with only \"yes\" or \"no\"."
+            )
+
+        summary_quality_judge = make_judge(
+            name="summary_quality",
+            instructions=judge_instructions,
+            feedback_value_type=Literal["yes", "no"],
+            model="openai:/llama32",
+            base_url=llm_endpoint + "/v1/chat/completions",
+            extra_headers={"Authorization": "Bearer no-key-required"},
+        )
+
+        SCORER_MAP = {
+            "summary_quality": summary_quality_judge,
+            "is_shorter": is_shorter,
+        }
+
         active_scorers = [SCORER_MAP[n] for n in scorer_names if n in SCORER_MAP]
 
         if not active_scorers:
@@ -189,16 +197,17 @@ def run_all_mlflow_tests(
         # Generate responses from backend
         eval_data = []
         for test in config.get("tests", []):
-            prompt = test.get("prompt", "")
-            expected = test.get("expected_result", "")
+            inputs = test.get("inputs", {})
+            prompt = inputs.get("prompt", "")
+            expectations = test.get("expectations", {})
             if not prompt:
                 continue
             print(f"Calling {endpoint} with prompt: {prompt[:80]}...")
             generated = prompt_backend(prompt, endpoint)
             eval_data.append({
-                "inputs":       {"prompt": prompt},
+                "inputs":       inputs,
                 "outputs":      generated,
-                "expectations": {"expected_result": expected},
+                "expectations": expectations,
             })
 
         if not eval_data:
