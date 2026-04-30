@@ -145,6 +145,35 @@ def run_all_mlflow_tests(
         url = urljoin(backend_url, endpoint)
         return send_request({"prompt": prompt}, url)
 
+    def fetch_workspace_records(workspace):
+        """Fetch all dataset records from a given MLflow workspace."""
+        original_workspace = os.environ.get("MLFLOW_WORKSPACE")
+        os.environ["MLFLOW_WORKSPACE"] = workspace
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        records = []
+        try:
+            for dataset in mlflow.genai.search_datasets():
+                for record in dataset.to_dict().get("records", []):
+                    records.append(record)
+            print(f"Fetched {len(records)} record(s) from workspace '{workspace}'")
+        except Exception as e:
+            print(f"Warning: could not fetch datasets from workspace '{workspace}': {e}")
+        finally:
+            if original_workspace is not None:
+                os.environ["MLFLOW_WORKSPACE"] = original_workspace
+            else:
+                os.environ.pop("MLFLOW_WORKSPACE", None)
+            mlflow.set_tracking_uri(mlflow_tracking_uri)
+        return records
+
+    # Derive sibling workspace names and fetch their dataset records once, before the config loop
+    current_workspace = os.environ.get("MLFLOW_WORKSPACE", "")
+    base_name = current_workspace.rsplit("-", 1)[0]  # e.g. "user1-toolings" → "user1"
+    external_records = []
+    for ws in [f"{base_name}-test", f"{base_name}-prod"]:
+        external_records.extend(fetch_workspace_records(ws))
+    print(f"Total external records to add per config: {len(external_records)}")
+
     # Main loop
     repo_dir = "/prompts"
 
@@ -208,6 +237,19 @@ def run_all_mlflow_tests(
                 "inputs":       inputs,
                 "outputs":      generated,
                 "expectations": expectations,
+            })
+
+        # Call backend for external dataset records and append to eval_data
+        for record in external_records:
+            prompt = record.get("inputs", {}).get("prompt", "")
+            if not prompt:
+                continue
+            print(f"Calling {endpoint} with external record prompt: {prompt[:80]}...")
+            generated = prompt_backend(prompt, endpoint)
+            eval_data.append({
+                "inputs":       record["inputs"],
+                "outputs":      generated,
+                "expectations": record.get("expectations", {}),
             })
 
         if not eval_data:
