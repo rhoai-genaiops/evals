@@ -1,5 +1,6 @@
 name: summary_tests
 description: Tests for the summary endpoint of the Llama 3.2 model.
+usecase: summarization
 endpoint: /summarization
 scorers:
   - summary_quality

@@ -89,7 +89,6 @@ def run_all_mlflow_tests(
     backend_url: str,
     llm_endpoint: str,
     mlflow_tracking_uri: str,
-    experiment_name: str = "canopy-evals-pipeline",
     git_hash: str = "test",
 ):
     """Call the backend, then evaluate responses with MLflow scorers."""
@@ -118,7 +117,6 @@ def run_all_mlflow_tests(
             os.environ["MLFLOW_TRACKING_TOKEN"] = f.read().strip()
 
     mlflow.set_tracking_uri(mlflow_tracking_uri)
-    mlflow.set_experiment(experiment_name)
 
     # Scorers
     summary_quality_judge = make_judge(
@@ -177,6 +175,9 @@ def run_all_mlflow_tests(
         with open(full_config_path) as f:
             config = yaml.safe_load(f)
 
+        usecase = config.get("usecase", config["name"])
+        mlflow.set_experiment(usecase)
+
         endpoint = config["endpoint"]
         scorer_names = config.get("scorers", ["summary_quality", "is_shorter"])
         active_scorers = [SCORER_MAP[n] for n in scorer_names if n in SCORER_MAP]
@@ -230,7 +231,6 @@ def canopy_eval_pipeline(
     backend_url: str = "",
     llm_endpoint: str = "",
     mlflow_tracking_uri: str = "",
-    experiment_name: str = "canopy-evals-pipeline",
     git_hash: str = "test",
 ):
     eval_pvc = kubernetes.CreatePVC(
@@ -260,7 +260,6 @@ def canopy_eval_pipeline(
         backend_url=backend_url,
         llm_endpoint=llm_endpoint,
         mlflow_tracking_uri=mlflow_tracking_uri,
-        experiment_name=experiment_name,
         git_hash=git_hash,
     )
     test_task.after(scan_task)
