@@ -82,13 +82,14 @@ def scan_directory_op() -> NamedTuple("Output", [("configs", List[dict])]):
 
 @component(
     base_image="python:3.12",
-    packages_to_install=["mlflow>=3.4.0", "httpx"]
+    packages_to_install=["mlflow>=3.4.0", "httpx", "kubernetes"]
 )
 def run_all_mlflow_tests(
     configs: List[dict],
     backend_url: str,
     llm_endpoint: str,
     mlflow_tracking_uri: str,
+    experiment_name: str = "canopy-evals-pipeline",
     git_hash: str = "test",
 ):
     """Call the backend, then evaluate responses with MLflow scorers."""
@@ -101,9 +102,10 @@ def run_all_mlflow_tests(
     from mlflow.genai.scorers import scorer
     from urllib.parse import urljoin
 
-    # ── MLflow setup ──────────────────────────────────────────────────────────
+    # MLflow setup
     os.environ["MLFLOW_TRACKING_AUTH"] = "kubernetes"
     os.environ["MLFLOW_TRACKING_INSECURE_TLS"] = "true"
+    os.environ["OPENAI_API_KEY"] = "no-key-required"
 
     namespace_path = "/run/secrets/kubernetes.io/serviceaccount/namespace"
     if os.path.exists(namespace_path):
@@ -116,9 +118,9 @@ def run_all_mlflow_tests(
             os.environ["MLFLOW_TRACKING_TOKEN"] = f.read().strip()
 
     mlflow.set_tracking_uri(mlflow_tracking_uri)
-    mlflow.set_experiment("canopy-evals-pipeline")
+    mlflow.set_experiment(experiment_name)
 
-    # ── Scorers ───────────────────────────────────────────────────────────────
+    # Scorers
     summary_quality_judge = make_judge(
         name="summary_quality",
         instructions=(
@@ -143,7 +145,7 @@ def run_all_mlflow_tests(
         "is_shorter": is_shorter,
     }
 
-    # ── Backend helpers ───────────────────────────────────────────────────────
+    # Backend helpers
     def send_request(payload, url):
         import httpx
         full_response = ""
@@ -165,7 +167,7 @@ def run_all_mlflow_tests(
         url = urljoin(backend_url, endpoint)
         return send_request({"prompt": prompt}, url)
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
+    # Main loop
     repo_dir = "/prompts"
 
     for config_dict in configs:
@@ -228,6 +230,7 @@ def canopy_eval_pipeline(
     backend_url: str = "",
     llm_endpoint: str = "",
     mlflow_tracking_uri: str = "",
+    experiment_name: str = "canopy-evals-pipeline",
     git_hash: str = "test",
 ):
     eval_pvc = kubernetes.CreatePVC(
@@ -257,6 +260,7 @@ def canopy_eval_pipeline(
         backend_url=backend_url,
         llm_endpoint=llm_endpoint,
         mlflow_tracking_uri=mlflow_tracking_uri,
+        experiment_name=experiment_name,
         git_hash=git_hash,
     )
     test_task.after(scan_task)
