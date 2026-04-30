@@ -1,6 +1,6 @@
 name: summary_tests
 description: Tests for the summary endpoint of the Llama 3.2 model.
-endpoint: /summarize
+endpoint: /summarization
 scorers:
   - summary_quality
   - is_shorter
