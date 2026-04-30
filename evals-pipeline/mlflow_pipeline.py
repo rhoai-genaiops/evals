@@ -131,7 +131,7 @@ def run_all_mlflow_tests(
         ),
         feedback_value_type=Literal["yes", "no"],
         model="openai:/llama32",
-        base_url=llm_endpoint,
+        base_url=llm_endpoint + "/v1/chat/completions",
         extra_headers={"Authorization": "Bearer no-key-required"},
     )
 
@@ -272,7 +272,7 @@ if __name__ == "__main__":
         "repo_url":             "https://<USER_NAME>:<PASSWORD>@<GIT_SERVER>/<USER_NAME>/evals.git",  # replace
         "branch":               "main",
         "backend_url":          "http://canopy-backend:8000",
-        "llm_endpoint":         "http://llama-32-predictor.ai501.svc.cluster.local:80/v1/chat/completions",
+        "llm_endpoint":         "http://llama-32-predictor.ai501.svc.cluster.local:80",
         "mlflow_tracking_uri":  "https://mlflow.redhat-ods-applications.svc.cluster.local:8443",
         "git_hash":             "test",
     }
