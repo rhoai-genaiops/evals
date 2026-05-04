@@ -120,8 +120,15 @@ def run_all_mlflow_tests(
 
     @scorer
     def is_shorter(outputs: str, inputs: dict) -> bool:
-        """Is the response shorter than the input prompt?"""
-        return len(outputs) < len(inputs.get("prompt", ""))
+        """Is the response shorter than the input?"""
+        if "prompt" in inputs:
+            return len(outputs) < len(inputs["prompt"])
+        elif "messages" in inputs:
+            user_content = " ".join(
+                m.get("content", "") for m in inputs["messages"] if m.get("role") == "user"
+            )
+            return len(outputs) < len(user_content)
+        return False
 
     # Backend helpers
     def send_request(payload, url):
@@ -141,23 +148,29 @@ def run_all_mlflow_tests(
                             continue
         return full_response
 
-    def prompt_backend(prompt, endpoint):
+    def call_backend(inputs, endpoint):
         url = urljoin(backend_url, endpoint)
-        return send_request({"prompt": prompt}, url)
+        if "prompt" in inputs:
+            return send_request({"prompt": inputs["prompt"]}, url)
+        elif "messages" in inputs:
+            return send_request(inputs, url)
+        return ""
 
-    def fetch_workspace_records(workspace):
-        """Fetch all dataset records from a given MLflow workspace."""
+    def fetch_workspace_records(workspace, dataset_names):
+        """Fetch records from named datasets in a given MLflow workspace."""
         original_workspace = os.environ.get("MLFLOW_WORKSPACE")
         os.environ["MLFLOW_WORKSPACE"] = workspace
         mlflow.set_tracking_uri(mlflow_tracking_uri)
         records = []
         try:
-            for dataset in mlflow.genai.search_datasets():
-                for record in dataset.to_dict().get("records", []):
-                    records.append(record)
-            print(f"Fetched {len(records)} record(s) from workspace '{workspace}'")
-        except Exception as e:
-            print(f"Warning: could not fetch datasets from workspace '{workspace}': {e}")
+            for name in dataset_names:
+                try:
+                    dataset = mlflow.genai.get_dataset(name=name)
+                    dataset_records = dataset.to_dict().get("records", [])
+                    print(f"  Workspace '{workspace}', dataset '{name}': {len(dataset_records)} record(s)")
+                    records.extend(dataset_records)
+                except Exception as e:
+                    print(f"  Workspace '{workspace}', dataset '{name}': not found ({e})")
         finally:
             if original_workspace is not None:
                 os.environ["MLFLOW_WORKSPACE"] = original_workspace
@@ -166,13 +179,10 @@ def run_all_mlflow_tests(
             mlflow.set_tracking_uri(mlflow_tracking_uri)
         return records
 
-    # Derive sibling workspace names and fetch their dataset records once, before the config loop
+    # Derive sibling workspace names once, before the config loop
     current_workspace = os.environ.get("MLFLOW_WORKSPACE", "")
-    base_name = current_workspace.rsplit("-", 1)[0]  # e.g. "user1-toolings" → "user1"
-    external_records = []
-    for ws in [f"{base_name}-test", f"{base_name}-prod"]:
-        external_records.extend(fetch_workspace_records(ws))
-    print(f"Total external records to add per config: {len(external_records)}")
+    base_name = current_workspace.rsplit("-", 1)[0]  # e.g. "user1-canopy" -> "user1"
+    external_workspaces = [f"{base_name}-test", f"{base_name}-prod"]
 
     # Main loop
     repo_dir = "/prompts"
@@ -189,6 +199,12 @@ def run_all_mlflow_tests(
 
         endpoint = config["endpoint"]
         scorer_names = config.get("scorers", ["summary_quality", "is_shorter"])
+
+        dataset_names = config.get("datasets", [])
+        external_records = []
+        for ws in external_workspaces:
+            external_records.extend(fetch_workspace_records(ws, dataset_names))
+        print(f"External records for '{config_path}': {len(external_records)}")
 
         # Load judge prompt from file if specified in config
         judge_prompt_file = config.get("judge_prompt")
@@ -227,12 +243,11 @@ def run_all_mlflow_tests(
         eval_data = []
         for test in config.get("tests", []):
             inputs = test.get("inputs", {})
-            prompt = inputs.get("prompt", "")
             expectations = test.get("expectations", {})
-            if not prompt:
+            if not inputs.get("prompt") and not inputs.get("messages"):
                 continue
-            print(f"Calling {endpoint} with prompt: {prompt[:80]}...")
-            generated = prompt_backend(prompt, endpoint)
+            print(f"Calling {endpoint} with test inputs...")
+            generated = call_backend(inputs, endpoint)
             eval_data.append({
                 "inputs":       inputs,
                 "outputs":      generated,
@@ -241,15 +256,16 @@ def run_all_mlflow_tests(
 
         # Call backend for external dataset records and append to eval_data
         for record in external_records:
-            prompt = record.get("inputs", {}).get("prompt", "")
-            if not prompt:
+            inputs = record.get("inputs", {})
+            expectations = record.get("expectations", {})
+            if not inputs.get("prompt") and not inputs.get("messages"):
                 continue
-            print(f"Calling {endpoint} with external record prompt: {prompt[:80]}...")
-            generated = prompt_backend(prompt, endpoint)
+            print(f"Calling {endpoint} with external record inputs...")
+            generated = call_backend(inputs, endpoint)
             eval_data.append({
-                "inputs":       record["inputs"],
+                "inputs":       inputs,
                 "outputs":      generated,
-                "expectations": record.get("expectations", {}),
+                "expectations": expectations,
             })
 
         if not eval_data:
