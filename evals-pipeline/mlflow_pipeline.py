@@ -228,8 +228,18 @@ def run_all_mlflow_tests(
             extra_headers={"Authorization": "Bearer no-key-required"},
         )
 
+        answer_quality_judge = make_judge(
+            name="answer_quality",
+            instructions=judge_instructions,
+            feedback_value_type=Literal["yes", "no"],
+            model="openai:/llama32",
+            base_url=llm_endpoint + "/v1/chat/completions",
+            extra_headers={"Authorization": "Bearer no-key-required"},
+        )
+
         SCORER_MAP = {
             "summary_quality": summary_quality_judge,
+            "answer_quality": answer_quality_judge,
             "is_shorter": is_shorter,
         }
 
