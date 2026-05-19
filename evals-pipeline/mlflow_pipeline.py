@@ -345,7 +345,7 @@ def canopy_eval_pipeline(
 
 if __name__ == "__main__":
     arguments = {
-        "repo_url":             "https://<USER_NAME>:<PASSWORD>@<GIT_SERVER>/<USER_NAME>/evals.git",  # replace
+        "repo_url":             "https://<USER_NAME>:<PASSWORD>@<GIT_SERVER>/<USER_NAME>/evals.git",  # 🚨 replace with your own repo URL
         "branch":               "main",
         "backend_url":          "http://canopy-backend:8000",
         "llm_endpoint":         "http://llama-32-predictor.ai501.svc.cluster.local:8080",
