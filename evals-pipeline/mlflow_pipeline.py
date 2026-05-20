@@ -160,6 +160,10 @@ def run_all_mlflow_tests(
         """Fetch records from named datasets in a given MLflow workspace."""
         original_workspace = os.environ.get("MLFLOW_WORKSPACE")
         os.environ["MLFLOW_WORKSPACE"] = workspace
+        # Force the MLflow client to reinitialize so it picks up the new MLFLOW_WORKSPACE.
+        # Calling set_tracking_uri with the same URI is often a no-op; using a dummy URI
+        # first guarantees the tracking store is torn down and rebuilt with the new env var.
+        mlflow.set_tracking_uri("")
         mlflow.set_tracking_uri(mlflow_tracking_uri)
         records = []
         try:
@@ -176,6 +180,7 @@ def run_all_mlflow_tests(
                 os.environ["MLFLOW_WORKSPACE"] = original_workspace
             else:
                 os.environ.pop("MLFLOW_WORKSPACE", None)
+            mlflow.set_tracking_uri("")
             mlflow.set_tracking_uri(mlflow_tracking_uri)
         return records
 
